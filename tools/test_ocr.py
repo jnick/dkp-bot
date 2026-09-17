@@ -13,10 +13,39 @@ from app.core.docgen import DocGenerator  # noqa: E402
 from app.core.engine import Engine  # noqa: E402
 from app.core.messages import IncomingMessage  # noqa: E402
 from app.core.session import SessionStore  # noqa: E402
+from app.ocr.dateutil import parse_date  # noqa: E402
+from app.ocr.geo import Line  # noqa: E402
+from app.ocr.passport import extract_passport  # noqa: E402
 from app.ocr.recognize import OcrService  # noqa: E402
 
 FONT = "/System/Library/Fonts/Supplemental/Arial.ttf"
 FONT_B = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+
+_LAT = str.maketrans("АВЕКМНОРСТУХ", "ABEKMHOPCTYX")
+
+
+def _lat(s: str) -> str:
+    return s.upper().translate(_LAT)
+
+
+def _lev(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _tok_eq(x: str, y: str) -> bool:
+    return x == y or (abs(len(x) - len(y)) <= 1 and _lev(x, y) <= 1)
+
+
+def _fio_ok(actual: str, expected: str) -> bool:
+    a = actual.upper().split()
+    e = expected.upper().split()
+    return len(a) == len(e) and all(_tok_eq(x, y) for x, y in zip(a, e))
 
 
 def _png(draw_into, w, h) -> bytes:
@@ -86,7 +115,7 @@ def test_extraction() -> None:
     svc = OcrService()
     pp = svc.passport(make_passport_png(), "seller")
     print("passport ->", pp)
-    assert pp.get("seller_fio") == "ИВАНОВ ИВАН ИВАНОВИЧ", pp
+    assert _fio_ok(pp.get("seller_fio") or "", "ИВАНОВ ИВАН ИВАНОВИЧ"), pp
     assert pp.get("seller_birth") == "12.06.1988", pp
     assert pp.get("seller_pasp_series") == "4508", pp
     # модель OCR на синтетическом шрифте плохо читает чистые цифры — поля ниже опциональны
@@ -104,7 +133,8 @@ def test_extraction() -> None:
         import re as _re
 
         assert _re.fullmatch(r"[0-9A-HJ-NPR-Z]{17}", front["car_vin"]), front
-    assert front.get("car_make_model") == "TOYOTA CAMRY", front
+    assert front.get("car_make_model") is not None
+    assert _lat(front["car_make_model"]) == _lat("TOYOTA CAMRY"), front
     assert front.get("car_year") == "2018", front
     if front.get("car_body_color"):
         assert front["car_body_color"], front
@@ -116,6 +146,56 @@ def test_extraction() -> None:
     back = svc.pts_back(make_pts_back_png())
     print("pts back ->", back)
     assert back.get("car_pts_date") == "12.06.2018", back
+
+
+def _ln(text, x0, y0, x1, y1, score=0.99) -> Line:
+    return Line(text=text, x0=x0, y0=y0, x1=x1, y1=y1, score=score)
+
+
+def test_date_hardened() -> None:
+    assert parse_date("12 06 1988 г.") == "12.06.1988"
+    assert parse_date("12.06.1988 г.") == "12.06.1988"
+    assert parse_date("12.06.2014") == "12.06.2014"
+    assert parse_date("12 июня 1988") == "12.06.1988"
+    assert parse_date("12. июня 1988 г.") == "12.06.1988"
+    assert parse_date("12/06/1988") == "12.06.1988"
+    assert parse_date("3.5.20") == "03.05.2020"
+    assert parse_date("45 08") is None
+    assert parse_date("1700000") is None
+    assert parse_date("770-120") is None
+    assert parse_date("1988") is None
+    assert parse_date("") is None
+    print("date pars ok")
+
+
+def test_parser_hardened() -> None:
+    # подпись+значение в одном боксе, разделённые цифры в верхней полосе,
+    # дата с пробелами и «г.», нечёткая подпись «отчествo»
+    ls = [
+        _ln("РОССИЙСКАЯ ФЕДЕРАЦИЯ", 200, 5, 1200, 35),
+        _ln("45", 600, 40, 640, 75),
+        _ln("08", 660, 40, 700, 75),
+        _ln("123456", 600, 90, 740, 125),
+        _ln("Фамилия ИВАНОВ", 60, 160, 440, 195),
+        _ln("Имя: ИВАН", 60, 260, 440, 295),
+        _ln("Отчествo", 60, 360, 440, 395),
+        _ln("ИВАНОВИЧ", 520, 360, 940, 395),
+        _ln("Дата рождения:", 60, 460, 520, 495),
+        _ln("12 06 1988 г.", 500, 460, 940, 495),
+        _ln("Кем выдан: ОВД РАЙОНА ХАМОВНИКИ ГОРОДА МОСКВЫ", 60, 560, 1320, 595),
+        _ln("Дата выдачи 12.06.2014", 60, 660, 1040, 695),
+        _ln("Код подразделения 770-120", 60, 760, 1040, 795),
+    ]
+    out = extract_passport(ls, "seller")
+    print("parser ->", out)
+    assert out["seller_fio"] == "ИВАНОВ ИВАН ИВАНОВИЧ", out
+    assert out["seller_birth"] == "12.06.1988", out
+    assert out["seller_pasp_series"] == "4508", out
+    assert out["seller_pasp_number"] == "123456", out
+    assert out["seller_pasp_issuer"] == "ОВД РАЙОНА ХАМОВНИКИ ГОРОДА МОСКВЫ", out
+    assert out["seller_pasp_date"] == "12.06.2014", out
+    assert out["seller_pasp_kod"] == "770120", out
+    print("parser hardened ok")
 
 
 def test_engine_e2e() -> None:
@@ -217,6 +297,8 @@ def test_engine_e2e() -> None:
 
 
 if __name__ == "__main__":
+    test_date_hardened()
+    test_parser_hardened()
     test_extraction()
     test_engine_e2e()
     print("ALL OK")

@@ -18,29 +18,46 @@ MONTHS = {
     "декабря": "12", "декабрь": "12", "дек": "12",
 }
 
-NUMERIC_DATE = re.compile(r"(\d{1,2})[./\-](\d{1,2})[./\-](\d{2,4})")
-WORD_DATE = re.compile(r"(\d{1,2})\s*[.\s]?\s*([а-яё]+)\s*[.\s]?\s*(\d{2,4})", re.IGNORECASE)
+_O = {"о": "0", "О": "0", "o": "0", "O": "0", "ᅳ": "0"}
+
+NUMERIC_DATE = re.compile(
+    r"(?<![\d])(\d{1,2})\s*[./\-–—]\s*(\d{1,2})\s*[./\-–—]\s*(\d{2,4})\s*г?\.?(?![\d])",
+    re.IGNORECASE,
+)
+SPACED_DATE = re.compile(r"(?<![\d])(\d{1,2})\s+(\d{1,2})\s+(\d{2,4})(?![\d])", re.IGNORECASE)
+WORD_DATE = re.compile(
+    r"(?<![\d])(\d{1,2})\s*[.\s]?\s*([а-яё]+)\s*[.\s]?\s*(\d{2,4})\s*г?\.?(?![\d])",
+    re.IGNORECASE,
+)
+
+DAYS_IN_MONTH = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 
 
 def parse_date(text: str) -> Optional[str]:
-    """Возвращает ДД.ММ.ГГГГ из даты цифрами или словами, либо None."""
+    """Возвращает ДД.ММ.ГГГГ из даты (цифрами, с пробелами, словами, «г.»), иначе None."""
     if not text:
         return None
-    t = "".join({"о": "0", "О": "0", "o": "0", "O": "0"}.get(ch, ch) for ch in text.strip())
-    m = NUMERIC_DATE.search(t)
-    if m:
-        d, mo, y = m.group(1), m.group(2), m.group(3)
-        return _fmt_date(d, mo, y)
-    m = WORD_DATE.search(t)
-    if m:
-        d, mo_word, y = m.group(1), m.group(2).lower(), m.group(3)
-        month = MONTHS.get(mo_word.rstrip("."))
-        if month is None:
-            return None
-        return _fmt_date(d, month, y)
+    t = "".join(_O.get(ch, ch) for ch in text.strip())
+    for m in (NUMERIC_DATE.search(t), SPACED_DATE.search(t), WORD_DATE.search(t)):
+        if not m:
+            continue
+        if m.re is WORD_DATE:
+            month = MONTHS.get(m.group(2).rstrip(".").lower())
+            if month is None:
+                continue
+            res = _fmt_date(m.group(1), month, m.group(3))
+        else:
+            res = _fmt_date(m.group(1), m.group(2), m.group(3))
+        if res:
+            return res
     return None
 
 
-def _fmt_date(day: str, month: str, year: str) -> str:
+def _fmt_date(day: str, month: str, year: str) -> Optional[str]:
+    d, mo = int(day), int(month)
+    if mo < 1 or mo > 12:
+        return None
+    if d < 1 or d > DAYS_IN_MONTH[mo - 1]:
+        return None
     y = year if len(year) == 4 else ("20" + year if int(year) < 90 else "19" + year)
-    return f"{int(day):02d}.{int(month):02d}.{int(y):04d}"
+    return f"{d:02d}.{mo:02d}.{int(y):04d}"
