@@ -264,3 +264,60 @@ def contract_label_field(field: Field) -> str:
         "realty_address": "Объект",
     }
     return labels.get(field.key, field.key.replace("_", " "))
+
+
+# ---------- блоки мастера и OCR-поля ----------
+
+ROLE_PREFIX = {"seller": "seller_", "buyer": "buyer_", "car": "car_"}
+
+PASSPORT_OCR_KEYS = (
+    "fio",
+    "birth",
+    "pasp_series",
+    "pasp_number",
+    "pasp_issuer",
+    "pasp_date",
+    "pasp_kod",
+)
+
+PTS_OCR_KEYS = (
+    "car_make_model",
+    "car_year",
+    "car_vin",
+    "car_body_color",
+    "car_pts_series",
+    "car_pts_number",
+    "car_pts_date",
+)
+
+
+def blocks_of(tpl: dict) -> List[dict]:
+    """Блоки полей шаблона: {id, role, name, start, doc, ocr_keys}.
+
+    doc: None | "passport" | "pts" — тип документа, который можно распознать с фото.
+    """
+    fields = tpl["fields"]
+    starts: Dict[str, int] = {}
+    for i, f in enumerate(fields):
+        if f.key in ("city", "signing_date") and "meta" not in starts:
+            starts["meta"] = i
+        for role, prefix in ROLE_PREFIX.items():
+            if f.key.startswith(prefix) and role not in starts:
+                starts[role] = i
+
+    blocks: List[dict] = []
+    if "meta" in starts:
+        blocks.append({"id": "meta", "role": "_meta", "name": "Общие данные", "start": starts["meta"], "doc": None, "ocr_keys": []})
+    for role in ("seller", "buyer", "car"):
+        if role not in starts:
+            continue
+        prefix = ROLE_PREFIX[role]
+        if role == "car":
+            name, doc, ocr_keys = "Данные автомобиля", "pts", list(PTS_OCR_KEYS)
+        else:
+            name = "Данные продавца" if role == "seller" else "Данные покупателя"
+            doc = "passport"
+            ocr_keys = [prefix + k for k in PASSPORT_OCR_KEYS]
+        blocks.append({"id": role, "role": role, "name": name, "start": starts[role], "doc": doc, "ocr_keys": ocr_keys})
+    blocks.sort(key=lambda b: b["start"])
+    return blocks

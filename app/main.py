@@ -9,6 +9,7 @@ from app.channels.telegram_ch import TelegramChannel
 from app.core.docgen import DocGenerator
 from app.core.engine import Engine
 from app.core.session import SessionStore
+from app.ocr.recognize import OcrService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("dkp")
@@ -16,7 +17,7 @@ log = logging.getLogger("dkp")
 
 def main() -> None:
     store = SessionStore(config.DB_PATH)
-    engine = Engine(store, DocGenerator())
+    engine = Engine(store, DocGenerator(), OcrService())
 
     channels = []
     if config.TELEGRAM_BOT_TOKEN:

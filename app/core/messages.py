@@ -12,6 +12,9 @@ class IncomingMessage:
     chat_id: str
     user_id: str
     text: Optional[str] = None
+    file_bytes: bytes = field(default_factory=bytes)
+    filename: str = ""
+    mime: str = ""
 
 
 @dataclass

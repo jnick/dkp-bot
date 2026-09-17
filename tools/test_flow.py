@@ -55,9 +55,35 @@ def run() -> None:
 
     send("/start")
     send("1")
-    for field_key, value in ANSWERS_MOV.items():
-        send(value)
-    send("да")
+
+    from app.core.contracts import CONTRACTS, blocks_of
+
+    fields = CONTRACTS["movables"]["fields"]
+    made = []
+    for _ in range(40):
+        s = store.get("t", "c1")
+        if s is None:
+            break
+        if s["state"] == "confirm":
+            made += send("да")
+            continue
+        idx = s["index"]
+        if idx >= len(fields):
+            made += send("да")
+            continue
+        key = fields[idx].key
+        block = None
+        for b in blocks_of(CONTRACTS["movables"]):
+            if b["start"] <= idx:
+                block = b
+        if block and block["doc"] and idx == block["start"] and not s["answers"].get("_mode:" + block["role"]):
+            send("вручную")
+            continue
+        send(ANSWERS_MOV.get(key, "-"))
+    else:
+        raise AssertionError("цикл не завершился за 40 шагов")
+
+    assert any(i.kind == "file" for i in made), "нет файла ДКП"
 
     last = send("/status")
     assert any("Активного договора нет" in i.text for i in last), "сессия должна была очиститься"
