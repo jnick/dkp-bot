@@ -20,6 +20,10 @@ MONTHS = {
 
 _O = {"о": "0", "О": "0", "o": "0", "O": "0", "ᅳ": "0"}
 
+ISO_DATE = re.compile(
+    r"(?<![\d])(\d{4})\s*[./\-]\s*(\d{1,2})\s*[./\-]\s*(\d{1,2})\s*(?:[T ].*)?Z?(?![\d])",
+    re.IGNORECASE,
+)
 NUMERIC_DATE = re.compile(
     r"(?<![\d])(\d{1,2})\s*[./\-–—]\s*(\d{1,2})\s*[./\-–—]\s*(\d{2,4})\s*г?\.?(?![\d])",
     re.IGNORECASE,
@@ -38,10 +42,12 @@ def parse_date(text: str) -> Optional[str]:
     if not text:
         return None
     t = "".join(_O.get(ch, ch) for ch in text.strip())
-    for m in (NUMERIC_DATE.search(t), SPACED_DATE.search(t), WORD_DATE.search(t)):
+    for m in (ISO_DATE.search(t), NUMERIC_DATE.search(t), SPACED_DATE.search(t), WORD_DATE.search(t)):
         if not m:
             continue
-        if m.re is WORD_DATE:
+        if m.re is ISO_DATE:
+            res = _fmt_date(m.group(3), m.group(2), m.group(1))
+        elif m.re is WORD_DATE:
             month = MONTHS.get(m.group(2).rstrip(".").lower())
             if month is None:
                 continue

@@ -10,12 +10,15 @@ RUN apt-get update \
         fonts-dejavu-core \
         libgl1 \
         libglib2.0-0 \
+        git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv/app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-rdocs.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-rdocs.txt \
+    && pip install --no-cache-dir --no-deps "git+https://github.com/protei300/RussianDocsOCR.git@v4.4.1" \
+    && rdocs-fetch-models
 
 COPY app ./app
 COPY templates_docx ./templates_docx

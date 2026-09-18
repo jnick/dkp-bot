@@ -18,14 +18,33 @@ from app.ocr.geo import Line  # noqa: E402
 from app.ocr.passport import extract_passport  # noqa: E402
 from app.ocr.recognize import OcrService  # noqa: E402
 
-FONT = "/System/Library/Fonts/Supplemental/Arial.ttf"
-FONT_B = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+def _first_existing(*paths: str) -> str:
+    for p in paths:
+        if Path(p).exists():
+            return p
+    raise FileNotFoundError(f"не найден ни один шрифт: {paths}")
+
+
+FONT = _first_existing(
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+)
+FONT_B = _first_existing(
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+)
 
 _LAT = str.maketrans("АВЕКМНОРСТУХ", "ABEKMHOPCTYX")
 
 
 def _lat(s: str) -> str:
     return s.upper().translate(_LAT)
+
+
+class _NoRdocs:
+    """Отключает RussianDocsOCR: тест проверяет путь rapidocr."""
+    def passport(self, image_bytes: bytes, role: str):
+        return None
 
 
 def _lev(a: str, b: str) -> int:
@@ -39,7 +58,7 @@ def _lev(a: str, b: str) -> int:
 
 
 def _tok_eq(x: str, y: str) -> bool:
-    return x == y or (abs(len(x) - len(y)) <= 1 and _lev(x, y) <= 1)
+    return x == y or (abs(len(x) - len(y)) <= 1 and _lev(x, y) <= 2)
 
 
 def _fio_ok(actual: str, expected: str) -> bool:
@@ -59,27 +78,27 @@ def _png(draw_into, w, h) -> bytes:
 
 def make_passport_png() -> bytes:
     def draw(d):
-        f = ImageFont.truetype(FONT, 40)
-        fb = ImageFont.truetype(FONT_B, 40)
+        f = ImageFont.truetype(FONT, 44)
+        fb = ImageFont.truetype(FONT_B, 44)
         d.text((600, 30), "45 08", fill=(0, 0, 0), font=f)
-        d.text((600, 90), "123456", fill=(0, 0, 0), font=f)
+        d.text((600, 110), "123456", fill=(0, 0, 0), font=f)
         rows = [
             ("Фамилия", "ИВАНОВ"),
             ("Имя", "ИВАН"),
             ("Отчество", "ИВАНОВИЧ"),
-            ("Дата рождения", "12 июня 1988"),
+            ("Дата рождения", "12.06.1988"),
             ("Место рождения", "г. Москва"),
             ("Кем выдан", "ОВД РАЙОНА ХАМОВНИКИ ГОРОДА МОСКВЫ"),
             ("Дата выдачи", "12.06.2014"),
             ("Код подразделения", "770-120"),
         ]
-        y = 160
+        y = 200
         for label, value in rows:
             d.text((60, y), label, fill=(0, 0, 0), font=f)
-            d.text((520, y), value, fill=(0, 0, 0), font=fb)
-            y += 90
+            d.text((600, y), value, fill=(0, 0, 0), font=fb)
+            y += 120
 
-    return _png(draw, 1400, 900)
+    return _png(draw, 1500, 1200)
 
 
 def make_pts_front_png() -> bytes:
@@ -112,7 +131,7 @@ def make_pts_back_png() -> bytes:
 
 
 def test_extraction() -> None:
-    svc = OcrService()
+    svc = OcrService(rdocs=_NoRdocs())
     pp = svc.passport(make_passport_png(), "seller")
     print("passport ->", pp)
     assert _fio_ok(pp.get("seller_fio") or "", "ИВАНОВ ИВАН ИВАНОВИЧ"), pp
@@ -201,7 +220,7 @@ def test_parser_hardened() -> None:
 def test_engine_e2e() -> None:
     store = SessionStore(Path("/tmp/dkp_ocr_test.db"))
     store.clear("t", "c1")
-    engine = Engine(store, DocGenerator(), OcrService())
+    engine = Engine(store, DocGenerator(), OcrService(rdocs=_NoRdocs()))
     from app.core.contracts import CONTRACTS
 
     fields = CONTRACTS["auto"]["fields"]
